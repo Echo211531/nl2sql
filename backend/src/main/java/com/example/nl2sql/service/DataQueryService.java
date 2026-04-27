@@ -24,16 +24,16 @@ public class DataQueryService {
 
     private final ChatClient chatClient;
     private final VectorStore vectorStore;
-    private final JdbcTemplate jdbcTemplate;
+    private final DatasourceManager datasourceManager;
     private final SqlSecurityValidator sqlSecurityValidator;
 
     public DataQueryService(ChatClient chatClient,
                             VectorStore vectorStore,
-                            JdbcTemplate jdbcTemplate,
+                            DatasourceManager datasourceManager,
                             SqlSecurityValidator sqlSecurityValidator) {
         this.chatClient = chatClient;
         this.vectorStore = vectorStore;
-        this.jdbcTemplate = jdbcTemplate;
+        this.datasourceManager = datasourceManager;
         this.sqlSecurityValidator = sqlSecurityValidator;
     }
 
@@ -42,14 +42,17 @@ public class DataQueryService {
             return DataQueryResponse.error("问题不能为空");
         }
 
+        JdbcTemplate jdbcTemplate = datasourceManager.getCurrentJdbcTemplate();
+        if (jdbcTemplate == null) {
+            return DataQueryResponse.error("未配置数据源，请先在设置页面配置数据库连接");
+        }
+
         log.info("收到查询请求: {}", question);
 
         try {
-            // 第一步：从向量数据库召回相关Schema
             String schemaContext = recallSchema(question);
             log.debug("召回的Schema上下文: {}", schemaContext);
 
-            // 第二步：使用大模型生成SQL
             String generatedSql = generateSql(question, schemaContext);
             log.info("生成的SQL: {}", generatedSql);
 
@@ -58,7 +61,6 @@ public class DataQueryService {
                 return DataQueryResponse.error("无法根据该问题生成SQL语句");
             }
 
-            // 第三步：安全校验
             try {
                 sqlSecurityValidator.validate(generatedSql);
             } catch (SqlSecurityException e) {
@@ -66,10 +68,8 @@ public class DataQueryService {
                 return DataQueryResponse.error("安全校验未通过: " + e.getMessage());
             }
 
-            // 第四步：执行SQL
             List<Map<String, Object>> results = jdbcTemplate.queryForList(generatedSql);
 
-            // 第五步：提取列名
             List<String> columns = new ArrayList<>();
             if (!results.isEmpty()) {
                 columns = new ArrayList<>(results.get(0).keySet());
@@ -109,12 +109,12 @@ public class DataQueryService {
     private String generateSql(String question, String schemaContext) {
         String userPrompt = String.format("""
                 根据以下数据库表结构，为用户的问题生成一条MySQL SELECT查询语句。
-                
+
                 数据库表结构:
                 %s
-                
+
                 用户问题: %s
-                
+
                 请仅输出SQL查询语句:""", schemaContext, question);
 
         String response = chatClient.prompt()
@@ -126,7 +126,6 @@ public class DataQueryService {
             return null;
         }
 
-        // 清理响应 - 去除可能存在的markdown代码块标记
         String sql = response.trim();
         if (sql.startsWith("```sql")) {
             sql = sql.substring(6);

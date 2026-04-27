@@ -18,12 +18,11 @@ public class Nl2SqlConfig {
     }
 
     @Bean
-    @ConditionalOnMissingBean(ChatClient.class)
     public ChatClient chatClient(ChatClient.Builder builder) {
         return builder
                 .defaultSystem("""
                         你是一个MySQL SQL查询生成器。你的任务是将自然语言问题转换为有效的MySQL SELECT查询语句。
-                        
+
                         规则：
                         1. 只能生成SELECT语句。绝对不要生成INSERT、UPDATE、DELETE、DROP、ALTER、CREATE或任何其他DML/DDL语句。
                         2. 使用提供的数据库表结构来理解表的设计。
